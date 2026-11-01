@@ -77,7 +77,18 @@ def trial(mode, rng):
                     missing=sum(s not in counts for s in range(STEPS)))
 
 
-def main(trials=30):
+def overhead(steps=500):
+    """Time added per durable step on this machine, which depends on the disk's sync speed."""
+    with tempfile.TemporaryDirectory() as folder:
+        run = Run(f"{folder}/j.db", "o")
+        noop = lambda idempotency_key: 1
+        start = time.perf_counter()
+        for i in range(steps):
+            run.step("n", noop)
+        return (time.perf_counter() - start) / steps * 1000
+
+
+def main(trials=100):
     rng = random.Random(0)
     out = {}
     for mode in ("restart", "journal", "journal+key"):
@@ -85,9 +96,29 @@ def main(trials=30):
         out[mode] = dict(trials=trials, kills=sum(r["crashes"] for r in rows),
                          mean_duplicate_charges=statistics.mean(r["extra"] for r in rows),
                          trials_with_duplicates=sum(r["extra"] > 0 for r in rows),
-                         missing_charges=sum(r["missing"] for r in rows))
+                         missing_charges=sum(r["missing"] for r in rows),
+                         duplicates_by_kills={str(k): statistics.mean(r["extra"] for r in rows if r["crashes"] == k)
+                                              for k in sorted({r["crashes"] for r in rows})})
         print(mode, out[mode], flush=True)
+    out["ms_per_step"] = overhead()
+    # Imported here on purpose: a slow import in the child would push kills before any step runs.
+    from benchmarks.charts import save
     pathlib.Path("benchmarks/results.json").write_text(json.dumps(out, indent=2))
+
+    def draw(fig, theme):
+        ax = fig.add_subplot()
+        names = [("restart", "Restart from the top"), ("journal", "Journal only"), ("journal+key", "Journal + idempotency key")]
+        for i, (mode, label) in enumerate(names):
+            row = out[mode]["duplicates_by_kills"]
+            keys = sorted(row, key=int)
+            ax.plot([int(k) for k in keys], [row[k] for k in keys], color=theme["series"][i], lw=2, marker="o", ms=7, label=label)
+        ax.set_xlabel("Times the process was killed during the run (SIGKILL)")
+        ax.set_ylabel("Duplicate charges per run")
+        ax.set_xticks(range(0, 5))
+        ax.set_ylim(bottom=-0.5)
+        ax.set_title(f"Crash test: 12 step agent, {trials} runs per design")
+        ax.legend(loc="upper left")
+    save(draw, "crash-test")
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 import pytest
 
-from resumable import Budget, BudgetExceeded, Run, StepFailed, run_agent
+from resumable import Budget, BudgetExceeded, Paused, Run, StepFailed, run_agent, signal
 from resumable.runtime import NonDeterministic
 
 
@@ -124,3 +124,66 @@ def test_result_must_be_json(tmp_path):
 
     with pytest.raises(StepFailed):
         Run(tmp_path / "j.db", "r").step("x", bad)
+
+
+def test_map_keeps_order_and_resumes_only_missing_items(tmp_path):
+    db = tmp_path / "j.db"
+    calls = []
+
+    def fn(x, idempotency_key):
+        calls.append(x)
+        if x == 3 and calls.count(3) == 1:
+            raise ValueError("first time")
+        return x * 10
+
+    def agent(run):
+        return run.map("job", fn, range(6), workers=3)
+
+    with pytest.raises(StepFailed):
+        run_agent(db, "r", agent)
+    # A failed run needs reopening by id, which a new run id does not touch.
+    run = Run(db, "r")
+    assert agent(run) == [0, 10, 20, 30, 40, 50]
+    assert sorted(calls) == [0, 1, 2, 3, 3, 4, 5]
+
+
+def test_steps_after_map_use_stable_sequence(tmp_path):
+    db = tmp_path / "j.db"
+    fn = lambda x, idempotency_key: x
+    def agent(run):
+        run.map("m", fn, [1, 2])
+        return run.step("after", lambda idempotency_key: "ok")
+    assert agent(Run(db, "r")) == "ok"
+    resumed = Run(db, "r")
+    assert agent(resumed) == "ok" and resumed.replayed == 3
+
+
+def test_human_approval_pauses_and_resumes(tmp_path):
+    db = tmp_path / "j.db"
+    actions = []
+
+    def act(idempotency_key):
+        actions.append("sent")
+        return True
+
+    def agent(run):
+        plan = run.step("plan", lambda idempotency_key: "refund 40")
+        if run.wait_for("approve"):
+            run.step("send", act)
+        return plan
+
+    with pytest.raises(Paused):
+        run_agent(db, "r", agent)
+    assert not actions and Run(db, "r").status() == "paused"
+    signal(db, "r", "approve", True)
+    assert run_agent(db, "r", agent) == "refund 40"
+    assert actions == ["sent"]
+
+
+def test_rejection_is_durable(tmp_path):
+    db = tmp_path / "j.db"
+    agent = lambda run: "stopped" if not run.wait_for("approve") else "went"
+    with pytest.raises(Paused):
+        run_agent(db, "r", agent)
+    signal(db, "r", "approve", False)
+    assert run_agent(db, "r", agent) == "stopped"
