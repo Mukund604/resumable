@@ -45,7 +45,7 @@ The fake ledger is a local stand in, and the kill timing is random rather than e
 * **Human approval.** `run.wait_for("approve")` raises `Paused` and survives restarts, and `signal(db, run_id, "approve", True)` lets the run continue.
 * **History** of each step's attempts, cost and duration, plus an error log.
 
-Each durable step adds about 0.08 ms on an Apple M5 SSD. macOS may not flush all the way to the disk platter on sync, so a power loss there is a weaker guarantee than the process kills tested here.
+Each durable step adds about 0.08 ms on an Apple M5 SSD. Sync on macOS may not reach the physical disk, so a power loss is a weaker guarantee than the process kills tested here.
 
 ## Limitations
 
