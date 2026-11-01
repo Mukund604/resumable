@@ -1,0 +1,23 @@
+{
+  "restart": {
+    "trials": 30,
+    "kills": 75,
+    "mean_duplicate_charges": 14.433333333333334,
+    "trials_with_duplicates": 25,
+    "missing_charges": 0
+  },
+  "journal": {
+    "trials": 30,
+    "kills": 50,
+    "mean_duplicate_charges": 0.6333333333333333,
+    "trials_with_duplicates": 15,
+    "missing_charges": 0
+  },
+  "journal+key": {
+    "trials": 30,
+    "kills": 44,
+    "mean_duplicate_charges": 0,
+    "trials_with_duplicates": 0,
+    "missing_charges": 0
+  }
+}
